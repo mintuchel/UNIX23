@@ -1,11 +1,11 @@
+#include <sys/types.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include <string.h>
-#include <dirent.h>
 #include <time.h>
 
 void cat_m(char **res){
@@ -13,6 +13,10 @@ void cat_m(char **res){
         int fd, n;
 
       	fd = open(res[1], O_RDONLY);
+	if(fd==-1){
+		perror("open error");
+		return;
+	}
 
 	while( (n = read(fd, buf, sizeof(buf))) > 0 ) {
 		write(1, buf, n);
@@ -22,7 +26,9 @@ void cat_m(char **res){
 }
 
 void cd_m(char **res){
-	chdir(res[1]);
+	if(chdir(res[1])==-1){
+		perror("chdir error");
+	}
 	return;	
 }
 
@@ -37,8 +43,12 @@ void cp_m(char **res){
 	}
 	
       	fd1 = open(res[1], O_RDONLY);
-
+	if(fd1==-1)
+		perror("fd1 open error");
+	
 	fd2 = open(res[2], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if(fd2==-1) 
+		perror("fd2 open error");
 
 	lseek(fd1, 0, SEEK_SET);
 
@@ -58,6 +68,8 @@ void ls_m(char **res){
 	getcwd(name,sizeof(name));
 
 	dp = opendir(name);
+	if(dp==NULL) 
+		perror("opendir error");
 	
 	// if NULL exit
 	while( (entry = readdir(dp)) != NULL){
@@ -75,7 +87,9 @@ void ls_m(char **res){
 
 void mkdir_m(char** res) {
 
-	mkdir(res[1], 0700);
+	if(mkdir(res[1], 0700)==-1){
+		perror("mkdir error");
+	}
         return;
 }
 
