@@ -111,29 +111,31 @@ int main(void){
 
 		// current working directory 이름 출력 (미작성 시 –2점 감점)
 		getcwd(in, sizeof(in));
-                printf("%s> ", in);
+        printf("%s> ", in);
 
-        	gets(in);
+        gets(in);
 		if (in[0]=='\0')
 			continue;
 
 		i=0;
           	res[i]=strtok(in, " ");
+		// tokenize "in" string using " " for delimeter
+		// and modify original string by changing " " to NULL
 		while (res[i]){
 			i++;
 			res[i]=strtok(NULL, " ");
 		}
 
-        	if (strcmp(res[0], "exit")==0)
-        	         exit(0);
+        if (strcmp(res[0], "exit")==0)
+        	    exit(0);
 
-        	for (i=0;i<6;i++){
-        	         if (!strcmp(res[0], inst[i])){
-        		         f[i](res);
-        		         break;
+        for (i=0;i<6;i++){
+        	if (!strcmp(res[0], inst[i])){
+        		f[i](res);
+        		break;
 			}
-        	}
+        }
 	}
 
-        return 0;
+    return 0;
 }

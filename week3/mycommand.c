@@ -75,6 +75,22 @@ void ls_m(char** res) {
         return;
 }
 
+void vi_m(char ** res){
+        struct stud buf;        
+        int fd;
+
+        fd = open(res[1], O_RDWR | O_CREAT, 0644);
+        scanf("%d", &buf.no);
+        getchar();
+
+        while(buf.no >0){
+                scanf("%d", &buf.no);
+                getchar();
+        }
+        lseek(fd, 0, SEEK_SET); 
+        write(1, res, 99);
+}
+
 int main(void) {
         char in[100], * res[20] = { 0 };
         char* inst[4] = { "cat", "cd", "mkdir", "ls" };
