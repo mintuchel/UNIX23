@@ -18,8 +18,8 @@
 
 void sigfunc();
 
-// 인자로 pid_t 배열 받음
-// 다른 자식들꺼까지 모두 알고 있음
+// gets pid_t array as an argument
+// each child know other child's pid
 void do_child(int i, int* cid) {
 	
 	int j;
