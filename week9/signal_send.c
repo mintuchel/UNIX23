@@ -1,38 +1,27 @@
-#include<fcntl.h>
-#include<unistd.h>
-#include<stdio.h>
-#include<string.h>
-#include<dirent.h>
-#include<ftw.h>
-#include<time.h>
+// LAB10-31 기초.c
+
 #include<signal.h>
 #include<stdlib.h>
 #include<sys/types.h>
 #include<sys/wait.h>
 #include<sys/stat.h>
-#include<sys/mman.h>
-#include<sys/ipc.h>
-#include<sys/msg.h>
-#include<sys/sem.h>
-#include<sys/shm.h>
 
-void catchint();
+void catchusr();
 
 void do_child(int N){
-	int i, pid;
-
-	// just for sigaction setting
-	// does not do anything
+	int i;
+	
+	// just for setting sigaction
 	static struct sigaction act;
-	act.sa_handler =  catchint;
+	act.sa_handler =  catchusr;
 	sigaction(SIGUSR1, &act, NULL);
 
 	printf("%d-th child is created...\n", N);
 	
-	// wait for an input signal 
+	// wait for a signal 
 	pause();
 
-	// if signaled print pid 3 times
+	// signal 받으면 자신의  pid 3번 출력
 	for(i=0;i<3;i++) {
 		printf("pid: %d\n", getpid());
 	}
@@ -50,14 +39,16 @@ int main(){
 			do_child(i);
 		}
 	}
-
-	// send each child process SIGUSR1 signal	
+	
 	for(i=0;i<3;i++){
 		sleep(1);
+		// send SIGUSR1 signal to pid[i] process
 		kill(pid[i], SIGUSR1);
 	}
 
+	// at this time, all the child processes are exited
 	for(i=0;i<3;i++){
+		// so catch all 3 child process's status
 		cid = wait(&status);
 		printf("child id=%d, exit status=%d\n", cid, WEXITSTATUS(status));
 	}
@@ -65,7 +56,7 @@ int main(){
 	exit(0);
 }
 
-void catchint() {
+void catchusr() {
 	// codes
-	printf("catchint called\n");
+	printf("catchusr called\n");
 }

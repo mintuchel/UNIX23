@@ -1,3 +1,5 @@
+// 11-02 연습문제
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
