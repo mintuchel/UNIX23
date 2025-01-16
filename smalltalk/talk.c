@@ -21,13 +21,19 @@ struct q_entry nmessage(int mtype, int s_id, char *str); // normal message
 
 void do_writer(int qid, int id)
 {
-    char temp[512];
+    char buffer[512];
     int i, cnum, index;
     struct q_entry msg1, msg2;
 
     while (1)
     {
-        scanf("%s", temp);
+        // 문장 입력받기
+        fgets(buffer, sizeof(buffer), stdin);
+        size_t len = strlen(buffer);
+        if (len > 0 && buffer[len - 1] == '\n')
+        {
+            buffer[len - 1] = '\0';
+        }
 
         /* (i) message 보내기 전 준비 */
         msgrcv(qid, &msg1, 524, 999, 0);
@@ -36,7 +42,7 @@ void do_writer(int qid, int id)
         msg1.snum += 1;
         msgsnd(qid, &msg1, 524, 0);
 
-        msg2 = nmessage(index, id, temp);
+        msg2 = nmessage(index, id, buffer);
         for (i = 0; i < cnum; i++)
         {
             msgsnd(qid, &msg2, 524, 0);
@@ -46,7 +52,7 @@ void do_writer(int qid, int id)
         if (cnum == 1)
             printf("id=%d, talkers=%d, msg#=%d ...\n", id, msg1.cnum, msg1.snum);
 
-        if (strcmp(temp, "talk_quit") == 0)
+        if (strcmp(buffer, "talk quit") == 0)
             break;
     }
 
@@ -68,7 +74,7 @@ void do_reader(int qid, int id, int index)
         /* (c) message 받은 후 필요한 작업 */
         else if (msg.s_id == id)
         {
-            if (strcmp(msg.msg, "talk_quit") == 0)
+            if (strcmp(msg.msg, "talk quit") == 0)
                 break;
         }
 
@@ -85,7 +91,7 @@ int main(int argc, char **argv)
     key_t key;
     struct q_entry msg1, msg2;
 
-    key = ftok("key", 5);
+    key = ftok("token", 5);
 
     /* (k) message queue 만들고 초기화 작업 */
     qid = msgget(key, 0600 | IPC_CREAT | IPC_EXCL);
