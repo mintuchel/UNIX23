@@ -116,6 +116,9 @@ int main(int argc, char **argv)
 
     union semun arg;
 
+    // 1 = prevents overflow
+    // 2 = prevents underflow (number of items in the buffer that are available for consumption)
+    // 3 = control buffer access (mutual exclusion) amount of free space left in
     ushort buf[3] = {N, 0, 1};
 
     struct manage_buffer *manage;

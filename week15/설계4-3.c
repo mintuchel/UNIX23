@@ -15,8 +15,8 @@ struct q_entry{
     char msg[512];
 };
 
-struct q_entry cmessage(int mtype, int snum, int cnum);
-struct q_entry nmessage(int mtype, int s_id, char *str);
+struct q_entry cmessage(int mtype, int snum, int cnum); // control message
+struct q_entry nmessage(int mtype, int s_id, char *str); // normal message
 
 void do_writer(int qid, int id){
 	char temp[512];
@@ -58,7 +58,7 @@ void do_reader(int qid, int id, int index){
             printf("[sender=%d & msg#=%d] %s\n", msg.s_id, msg.mtype, msg.msg);
         }
 		/* (c) message 받은 후 필요한 작업 */
-        else if(msg.sid==id){
+        else if(msg.s_id==id){
             if(strcmp(msg.msg, "talk_quit")==0)
                 break;
         }
@@ -80,7 +80,7 @@ int main(int argc, char** argv){
     if(qid==-1){
         qid = msgget(key, 0600);
     }else{
-        msg1 = cmessage(999,0);
+        msg1 = cmessage(999, 1, 0);
         msgsnd(qid, &msg1, 524, 0);
     }
 
@@ -123,8 +123,8 @@ struct q_entry cmessage(int mtype, int snum, int cnum){
 	struct q_entry msg;
 	
 	msg.mtype=mtype;
-	msg.snum=snum;
-	msg.cnum=cnum;
+	msg.snum=snum; // starting_idx_number
+	msg.cnum=cnum; // client_number
 	msg.s_id=0;
 	strcpy(msg.msg, "");
 
@@ -137,7 +137,7 @@ struct q_entry nmessage(int mtype, int s_id, char *str){
 	msg.mtype=mtype;
 	msg.snum=0;
 	msg.cnum=0;
-	msg.s_id=s_id;
+	msg.s_id=s_id; // sender_id
 	strcpy(msg.msg, str);
 
 	return msg;
