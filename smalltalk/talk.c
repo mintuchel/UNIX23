@@ -119,8 +119,9 @@ int main(int argc, char **argv)
     if (pid[0] == 0)
     {
         do_writer(qid, id);
-        exit(0);
+        exit(0); // fork해서 자식이 부모 코드 그대로 물려받고 자식에서 실행됨
     }
+
     pid[1] = fork();
     if (pid[1] == 0)
     {
@@ -128,6 +129,7 @@ int main(int argc, char **argv)
         exit(0);
     }
 
+    // 자식 프로세스 종료될때까지 wait
     for (i = 0; i < 2; i++)
         wait(0);
 
