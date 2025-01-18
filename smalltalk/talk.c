@@ -25,6 +25,11 @@ struct manage_buffer
     int index;
 };
 
+struct logpid_buffer
+{
+    int logpid;
+};
+
 struct q_entry nmessage(int mtype, int s_id, char *str);
 
 void do_writer(int qid, int id, int semid, struct manage_buffer * shmptr)
@@ -100,6 +105,30 @@ void do_reader(int qid, int id, int index)
 
     exit(0);
 }
+
+// pid_t exec_log(int shmid, int semid)
+// {
+//     char shmid_str[16], semid_str[16];
+
+//     // int를 문자열로 변환
+//     snprintf(shmid_str, sizeof(shmid_str), "%d", shmid);
+//     snprintf(semid_str, sizeof(semid_str), "%d", semid);
+
+//     pid_t logger_pid = fork();
+
+//     // 자식이면 여기서 진행
+//     if (logger_pid == 0)
+//     {
+//         // execl을 사용하여 다른 프로세스 실행 (num1_str, num2_str 전달)
+//         execl("./log", "log", shmid_str, semid_str, (char *)NULL);
+//         exit(0);
+//     }
+//     // 부모면 생성된 pid를 main한테 보냄
+//     else
+//     {
+//         return logger_pid;
+//     }
+// }
 
 int main(int argc, char **argv)
 {
@@ -205,27 +234,3 @@ struct q_entry nmessage(int mtype, int s_id, char *str)
 
     return msg;
 }
-
-// pid_t exec_log(int shmid, int semid)
-// {
-//     char shmid_str[16], semid_str[16];
-
-//     // int를 문자열로 변환
-//     snprintf(shmid_str, sizeof(shmid_str), "%d", shmid);
-//     snprintf(semid_str, sizeof(semid_str), "%d", semid);
-
-//     pid_t logger_pid = fork();
-
-//     // 자식이면 여기서 진행
-//     if (logger_pid == 0)
-//     {
-//         // execl을 사용하여 다른 프로세스 실행 (num1_str, num2_str 전달)
-//         execl("./log", "log", shmid_str, semid_str, (char *)NULL);
-//         exit(0);
-//     }
-//     // 부모면 생성된 pid를 main한테 보냄
-//     else
-//     {
-//         return logger_pid;
-//     }
-// }

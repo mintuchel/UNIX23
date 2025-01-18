@@ -20,8 +20,6 @@
 #define BUFSIZE 512
 #define N 5
 
-void debug(struct manage_buffer *manage, struct message_buffer *message);
-
 struct manage_buffer
 {
     int front;
@@ -100,8 +98,6 @@ void sender(int id, int semid, int manage_shmid, int message_shmid)
         message[manage->front].read_counter = manage->total_user;
         manage->front = (manage->front + 1) % N;
 
-        debug(manage, message);
-
         semop(semid, signal, 2);
     }
 
@@ -112,7 +108,7 @@ int main(int argc, char **argv)
 {
     int i, id, semid, manage_shmid, message_shmid;
     key_t semkey, message_shmkey, manage_shmkey;
-    pid_t pid;
+    pid_t pid[2];
 
     union semun arg;
 
@@ -152,20 +148,24 @@ int main(int argc, char **argv)
 
     printf("id : %d\n", id);
 
-    pid = fork();
-
-    if (pid == 0) {
+    // receiver
+    pid[0] = fork();
+    if (pid[0] == 0) {
         receiver(id, semid, manage_shmid, message_shmid);
-    }else{
+        exit(0);
+    }
+
+    // sender
+    pid[1] = fork();
+    if(pid[1] == 0){
         sender(id, semid, manage_shmid, message_shmid);
+        exit(0);
     }
 
-    while (waitpid(pid, 0, WNOHANG) == 0)
-    {
-        sleep(1);
-        printf("Wait receiver child ... \n");
+    for (int i = 0; i < 2;i++){
+        wait(0);
     }
-
+    
     manage->id_buffer[id - 1] = 0;
     manage->total_user -= 1;
 
@@ -177,18 +177,4 @@ int main(int argc, char **argv)
     }
 
     exit(0);
-}
-
-void debug(struct manage_buffer *manage, struct message_buffer *message)
-{
-    int i;
-    printf("[manage_buffer] front : %d, back : %d, users : %d\n", manage->front, manage->back, manage->total_user);
-    printf("[id_buffer] : %d %d %d %d\n", manage->id_buffer[0], manage->id_buffer[1], manage->id_buffer[2],
-           manage->id_buffer[3]);
-
-    for (i = 0; i < N; i++)
-    {
-        printf("[%d : %s] ", (message + i)->sender_id, (message + i)->mtext);
-    }
-    printf("\n-----------------------------\n");
 }

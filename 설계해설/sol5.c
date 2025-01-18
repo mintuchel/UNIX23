@@ -45,18 +45,16 @@ struct message
 
 void receiver(int id, int semid, int manage_shmid, int message_shmid)
 {
-    // {1,-1,0}
-    // 1번째에 -1 하여 읽을 메세지가 있는지 확인
+    // 1번째에 -1 하여 읽을 메세지가 존재하는지 확인
     // 1번째가 0이면 모든 메세지를 읽었다는 뜻이므로 새 메세지가 들어올때까지 BLOCK
-    // {2,-1,0}
+
     // 2번째에 -1하여 공유자원에 대한 베타적 접근 여부 확인
     // 2번째가 0이면 누가 사용하고 있다는 것이므로 BLOCK
     struct sembuf wait[] = {{1, -1, 0}, {2, -1, 0}};
 
-    // {0,1,0}
     // 0번째에 +1 하여 메세지를 읽었으니 공간 하나 비었다는 의미로 +1
     // 0번째가 0이면 모든 메세지를 읽었다는 뜻이므로 새 메세지가 들어올때까지 BLOCK
-    // {2,1,0}
+
     // 2번째에 +1하여 공유자원에 대한 LOCK 반납
     // 2번째가 0이면 누가 사용하고 있다는 것이므로 BLOCK
     struct sembuf signal[] = {{0, 1, 0}, {2, 1, 0}};
@@ -116,8 +114,8 @@ void sender(int id, int semid, int manage_shmid, int message_shmid)
     // 2번째가 0이면 누가 사용하고 있다는 것이므로 BLOCK
     struct sembuf wait[] = {{0, -1, 0}, {2, -1, 0}};
 
-    // 1번째에 +1하여 작업 끝남과 동시에 자원 반환
-    // 2번째에 +1하여 작업 끝남과 동시에 자원 반환
+    // 1번째에 +1하여 읽을 메시지가 추가되었다고 signal
+    // 2번째에 +1하여 공유자원에 대한 배타적 접근 권한 반환
     struct sembuf signal[] = {{1, 1, 0}, {2, 1, 0}};
 
     struct manager *manage;
@@ -131,8 +129,7 @@ void sender(int id, int semid, int manage_shmid, int message_shmid)
 
     while (gets(input))
     {
-        // wait semop이 가능하다면
-        // 빈 공간이 존재하고 + 공유자원에 대한 접근이 가능하면
+        // 메시지를 쓸 빈 공간이 존재하고 + 배타적 접근 권한을 받았으면
         semop(semid, wait, 2);
 
         // message 구성하기
@@ -148,7 +145,7 @@ void sender(int id, int semid, int manage_shmid, int message_shmid)
 
         debug(manage, message);
 
-        // 종료에 대한 signal semop 하기
+        // 접근권한 반납
         semop(semid, signal, 2);
     }
 
@@ -159,9 +156,10 @@ void sender(int id, int semid, int manage_shmid, int message_shmid)
 // shared memory 2개 사용
 int main(int argc, char **argv)
 {
-    int i, id, semid, manage_shmid, message_shmid;
-    key_t semkey, message_shmkey, manage_shmkey;
-    pid_t pid;
+    int i, id;
+    int semid, manage_shmid, message_shmid;
+    key_t semkey, manage_shmkey, message_shmkey;
+    pid_t pid[2];
 
     // 세마포어 집합 초기화시 사용할 semun
     union semun arg;
@@ -196,14 +194,13 @@ int main(int argc, char **argv)
         semctl(semid, 0, SETALL, arg);
     }
 
-    // message_sharedmemory 가져오기
-    // N개의 message_buffer 공간을 확보한 shared_memory 생성
-    message_shmid = shmget(message_shmkey, N * sizeof(struct message), 0600 | IPC_CREAT);
-    message = (struct message *)shmat(message_shmid, 0, 0);
-
-    // manage_sharedmemory 가져오기
+    // manage_sharedmemory 생성/참조
     manage_shmid = shmget(manage_shmkey, sizeof(struct manager), 0600 | IPC_CREAT);
     manage = (struct manager *)shmat(manage_shmid, 0, 0);
+
+    // N개의 message_buffer 공간을 확보한 shared_memory 생성/참조
+    message_shmid = shmget(message_shmkey, N * sizeof(struct message), 0600 | IPC_CREAT);
+    message = (struct message *)shmat(message_shmid, 0, 0);
 
     id = atoi(argv[1]);
 
@@ -215,17 +212,32 @@ int main(int argc, char **argv)
     printf("id : %d\n", id);
 
     // 톡 읽을 reciever sender process fork로 만들어주기
-    pid = fork();
-    if (pid == 0)
-        receiver(id, semid, manage_shmid, message_shmid);
-    else
-        sender(id, semid, manage_shmid, message_shmid);
+    // pid = fork();
+    // if (pid == 0)
+    //     receiver(id, semid, manage_shmid, message_shmid);
+    // else
+    //     sender(id, semid, manage_shmid, message_shmid);
 
-    while (waitpid(pid, 0, WNOHANG) == 0)
-    {
-        sleep(1);
-        printf("Wait receiver child ... \n");
+    // while (waitpid(pid, 0, WNOHANG) == 0)
+    // {
+    //     sleep(1);
+    //     printf("Wait receiver child ... \n");
+    // }
+
+    pid[0] = fork();
+    if(pid[0]==0){
+        receiver(id, semid, manage_shmid, message_shmid);
+        exit(0);
     }
+
+    pid[1] = fork();
+    if(pid[1]==0){
+        sender(id, semid, manage_shmid, message_shmid);
+        exit(0);
+    }
+
+    for (int i = 0; i < 2;i++)
+        wait(0);
 
     // 특정 사용자가 종료했으면
     // 공유메모리 총 사용자 수 1 감소
