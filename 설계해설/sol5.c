@@ -20,132 +20,117 @@
 #define BUFSIZE 512
 #define N 5
 
-void debug(struct manager *manager, struct message *message);
-
-// 공유메모리에 대한 정보가 이 구조체로 형변환됨
+// 공유메모리에 대한 정보
 struct manager
 {
-    // 유한 버퍼를 원형큐 구조로 사용하기 때문에 idx 정보 필요
-    int frontIdx;
-    int backIdx;
-
+    int frontIdx; // 원형큐 머리
+    int rearIdx; // 원형큐 꼬리
+    int nextId; // 다음 메시지 id
     int total_user; // 현재 접속인원수
-    int id_buffer[4];
 };
 
-// 각 메시지에 대한 정보를 담는 구조체
+// 메시지 정보
 struct message
 {
-    int read_counter;    // 몇 명이 읽어야하는지. 각 receiver가 읽을때마다 이 값을 -1 시킴
-    int message_counter; // 내가 몇번째 메시지인지
-
-    int sender_id;       // 보낸 사람 id
+    int read_counter; // 몇 명이 읽어야하는지
+    int message_id; // 내가 몇번째 메시지인지
+    int sender_id; // 보낸 사람 id
     char mtext[BUFSIZE]; // message 내용
 };
 
-void receiver(int id, int semid, int manage_shmid, int message_shmid)
+void receiver(int id, int message_id, int semid, int manager_shmid, int message_arr_shmid)
 {
     // 1번째에 -1 하여 읽을 메세지가 존재하는지 확인
     // 1번째가 0이면 모든 메세지를 읽었다는 뜻이므로 새 메세지가 들어올때까지 BLOCK
-
     // 2번째에 -1하여 공유자원에 대한 베타적 접근 여부 확인
     // 2번째가 0이면 누가 사용하고 있다는 것이므로 BLOCK
     struct sembuf wait[] = {{1, -1, 0}, {2, -1, 0}};
 
-    // 0번째에 +1 하여 메세지를 읽었으니 공간 하나 비었다는 의미로 +1
-    // 0번째가 0이면 모든 메세지를 읽었다는 뜻이므로 새 메세지가 들어올때까지 BLOCK
+    // 0번째에 +1하여 버퍼 공간 추가 신호
+    // 2번째에 +1하여 공유자원에 대한 접근 권한 반환
+    struct sembuf signal1[] = {{0, 1, 0}, {2, 1, 0}};
 
-    // 2번째에 +1하여 공유자원에 대한 LOCK 반납
-    // 2번째가 0이면 누가 사용하고 있다는 것이므로 BLOCK
-    struct sembuf signal[] = {{0, 1, 0}, {2, 1, 0}};
+    // 내가 읽을 메시지가 아니면 read 권한과 접근 권한만 반납해놓으면 됨
+    // wait 때 -1 한 것을 그대로 +1 시켜서 놓으면 됨
+    struct sembuf signal2[] = {{1, 1, 0}, {2, 1, 0}};
 
-    struct sembuf p_buf[] = {{1, 1, 0}, {2, 1, 0}};
+    struct manager *manager_shm;
+    struct message *message_arr_shm;
 
-    struct manager *manage;
-    struct message *message;
-
-    // receiver가 읽어야할 메시지 번호
-    // receiver가 처리중인 messsage_counter 번호와 동일한 message 만 읽는다
-    int message_counter = 1;
-
-    manage = (struct manager *)shmat(manage_shmid, 0, 0);
-    message = (struct message *)shmat(message_shmid, 0, 0);
+    manager_shm = (struct manager *)shmat(manage_shmid, 0, 0);
+    message_arr_shm = (struct message *)shmat(message_shmid, 0, 0);
 
     while (1)
     {
         // 읽을 메세지 있는지 확인
-        // {1,-1,0} {2,-1,0}
         semop(semid, wait, 2);
 
-        // 현재 receiver가 처리하려는 메시지(message_counter) 와 manage->backIdx 위치에 저장된 메시지 번호가 같은지 확인
-        // 번호가 일치해야만 읽을 수 있음
-        if (message_counter == message[manage->backIdx].message_counter)
+        // 현재 처리해야하는 id 와 메시지의 id가 동일하다면 읽기
+        if (message_id == message_arr_shm[manager_shm->frontIdx].message_id)
         {
-            printf("[receiver] %d : %s\n", message[manage->backIdx].sender_id, message[manage->backIdx].mtext);
-            message[manage->backIdx].read_counter--; // receiver는 메시지를 읽으면 해당 메시지의 read_counter 값을 감소시킨다
-            message_counter++;                       // 그리고 내가 다음에 읽어야할 message_counter를 +1 (읽어야할 메시지 번호 갱신)
+            // 내가 보낸게 아니라면 출력
+            if(message_arr_shm[manager_shm->frontIdx].sender_id != id){
+                printf("[receiver] %d : %s\n", message_arr_shm[manager_shm->frontIdx].sender_id, message_arr_shm[manager_shm->frontIdx].mtext);
+            }
 
-            // 만약 내 턴에 read_counter가 0이 된다면 모두 읽었다는 뜻이므로 다음 메시지가 들어갈 idx를 바꿔준다
-            // 유한 버퍼이므로 원형 큐처럼 동작
-            if (message[manage->backIdx].read_counter == 0)
-                manage->backIdx = (manage->backIdx + 1) % N;
+            // 메시지 읽은 사람 -1
+            message_arr_shm[manager_shm->frontIdx].read_counter--;
+            // 다음으로 읽어야할 message_id +1
+            message_id++;
 
-            semop(semid, signal, 2);
+            // 모든 수신자가 해당 메시지를 읽었다면
+            if (message_arr_shm[manager_shm->frontIdx].read_counter == 0) {
+                // 원형큐의 frontIdx를 다음 위치로 이동
+                manager_shm->frontIdx = (manager_shm->frontIdx + 1) % N;
+                // 버퍼 공간 확보 신호 + 공유 자원 접근 권한 반환
+                semop(semid, signal1, 2);
+                continue;
+            }
         }
-        // 아직 읽을게 없으면
-        else
-        {
-            // 버퍼 접근 잠금을 해제하고 기다리기 (타 프로세스를 위한 자원 반환)
-            semop(semid, p_buf, 2);
-        }
+
+        // 내가 읽어야하는 message_id가 아니면 or 메시지를 읽었는데 마지막으로 읽은 사람이 아니면
+        // read에 대한 권한 반환 + 공유 자원 접근 권한 반환
+        semop(semid, signal2, 2);
     }
     return;
 }
 
-// idx0 : 버퍼의 빈 공간
-// idx1 : 읽을 메세지 존재성
-// idx2 : 공유 자원에 대한 동시 접근 방지 (Mutual Exclusion)
-void sender(int id, int semid, int manage_shmid, int message_shmid)
+void sender(int id, int semid, int manager_shmid, int message_arr_shmid)
 {
-    // 0번째에 -1 하여 메세지를 보낼 공간이 있는지 확인
-    // 0번째가 0이면 모든 버퍼가 꽉 찼다는 소리이므로 BLOCK
-
-    // 2번째에 -1하여 공유자원에 대한 베타적 접근 여부 확인
+    // 0번째에 -1 하여 버퍼에 메시지를 저장할 공간이 있는지 확인
+    // 0번째가 0이면 버퍼에 빈 공간이 없다는 뜻이므로 BLOCK
+    // 2번째에 -1하여 공유메모리에 대한 접근 가능 여부 확인
     // 2번째가 0이면 누가 사용하고 있다는 것이므로 BLOCK
     struct sembuf wait[] = {{0, -1, 0}, {2, -1, 0}};
 
     // 1번째에 +1하여 읽을 메시지가 추가되었다고 signal
-    // 2번째에 +1하여 공유자원에 대한 배타적 접근 권한 반환
+    // 2번째에 +1하여 공유자원에 대한 접근 권한 반환
     struct sembuf signal[] = {{1, 1, 0}, {2, 1, 0}};
 
-    struct manager *manage;
-    struct message *message;
+    struct manager *manager_shm;
+    struct message *message_arr_shm;
 
-    manage = (struct manager *)shmat(manage_shmid, 0, 0);
-    message = (struct message *)shmat(message_shmid, 0, 0);
+    manager_shm = (struct manager *)shmat(manage_shmid, 0, 0);
+    message_arr_shm = (struct message *)shmat(message_shmid, 0, 0);
 
-    int message_counter = 0;
     char input[BUFSIZE];
 
     while (gets(input))
     {
-        // 메시지를 쓸 빈 공간이 존재하고 + 배타적 접근 권한을 받았으면
+        // semwait 작업
         semop(semid, wait, 2);
 
-        // message 구성하기
-        message[manage->frontIdx].sender_id = id;
-        strcpy(message[manage->frontIdx].mtext, input);
-        message_counter += 1;
-        message[manage->frontIdx].message_counter = message_counter;
-        message[manage->frontIdx].read_counter = manage->total_user;
-
+        // message 버퍼에 저장하기
+        message_arr_shm[manager_shm->rearIdx].sender_id = id;
+        strcpy(message_arr_shm[manager_shm->rearIdx].mtext, input);
+        message_arr_shm[manager_shm->rearIdx].message_id = manager_shm->nextId;
+        message_arr_shm[manager_shm->rearIdx].read_counter = manager_shm->total_user;
+        manager_shm->nextId++;
         // 내 메시지 저장했으니 다음 메시지 저장될 곳 갱신
         // 원형큐이므로 버퍼 내에서 계속 순환하며 저장
-        manage->frontIdx = (manage->frontIdx + 1) % N;
+        manager_shm->rearIdx = (manager_shm->rearIdx + 1) % N;
 
-        debug(manage, message);
-
-        // 접근권한 반납
+        // semsignal
         semop(semid, signal, 2);
     }
 
@@ -157,8 +142,8 @@ void sender(int id, int semid, int manage_shmid, int message_shmid)
 int main(int argc, char **argv)
 {
     int i, id;
-    int semid, manage_shmid, message_shmid;
-    key_t semkey, manage_shmkey, message_shmkey;
+    int semid, manager_shmid, message_arr_shmid;
+    key_t semkey, manager_shmkey, message_arr_shmkey;
     pid_t pid[2];
 
     // 세마포어 집합 초기화시 사용할 semun
@@ -175,8 +160,8 @@ int main(int argc, char **argv)
 
     // 필요한 IPC 객체 키 가져오기
     semkey = ftok("semkey", 3);
-    manage_shmkey = ftok("manage_shmkey", 3);
-    message_shmkey = ftok("message_shmkey", 3);
+    manager_shmkey = ftok("manage_shmkey", 3);
+    message_arr_shmkey = ftok("message_shmkey", 3);
 
     // sempahore 3개 생성
     semid = semget(semkey, 3, 0600 | IPC_CREAT | IPC_EXCL);
@@ -195,44 +180,46 @@ int main(int argc, char **argv)
     }
 
     // manage_sharedmemory 생성/참조
-    manage_shmid = shmget(manage_shmkey, sizeof(struct manager), 0600 | IPC_CREAT);
-    manage = (struct manager *)shmat(manage_shmid, 0, 0);
+    manager_shmid = shmget(manager_shmkey, sizeof(struct manager), 0600 | IPC_CREAT);
+    manage = (struct manager *)shmat(manager_shmid, 0, 0);
+
+    // 톡방을 판 사람이면 초기화 진행
+    if(manage->total_user == 0){
+        manage->frontIdx = 0;
+        manage->rearIdx = 0;
+        manage->nextId = 1;
+        manage->total_user = 0;
+    }
 
     // N개의 message_buffer 공간을 확보한 shared_memory 생성/참조
-    message_shmid = shmget(message_shmkey, N * sizeof(struct message), 0600 | IPC_CREAT);
-    message = (struct message *)shmat(message_shmid, 0, 0);
+    message_arr_shmid = shmget(message_arr_shmkey, N * sizeof(struct message), 0600 | IPC_CREAT);
+    message = (struct message *)shmat(message_arr_shmid, 0, 0);
 
     id = atoi(argv[1]);
 
-    // manage_buffer의 총 사용자수 + 1
-    manage->total_user += 1;
+    struct sembuf w_buf = {2, -1, 0};
+    struct sembuf s_buf = {2, 1, 0};
 
-    debug(manage, message);
+    int message_id;
+
+    semop(semid, &w_buf, 1);
+
+    manage->total_user += 1; // 공유메모리 사용자 + 1
+    message_id = manage->nextId; // 읽어야할 메시지 수 파악
+
+    semop(semid, &s_buf, 1);
 
     printf("id : %d\n", id);
 
-    // 톡 읽을 reciever sender process fork로 만들어주기
-    // pid = fork();
-    // if (pid == 0)
-    //     receiver(id, semid, manage_shmid, message_shmid);
-    // else
-    //     sender(id, semid, manage_shmid, message_shmid);
-
-    // while (waitpid(pid, 0, WNOHANG) == 0)
-    // {
-    //     sleep(1);
-    //     printf("Wait receiver child ... \n");
-    // }
-
     pid[0] = fork();
     if(pid[0]==0){
-        receiver(id, semid, manage_shmid, message_shmid);
+        receiver(id, message_id, semid, message_id, manager_shmid);
         exit(0);
     }
 
     pid[1] = fork();
     if(pid[1]==0){
-        sender(id, semid, manage_shmid, message_shmid);
+        sender(id, semid, manager_shmid, message_arr_shmid);
         exit(0);
     }
 
@@ -241,31 +228,16 @@ int main(int argc, char **argv)
 
     // 특정 사용자가 종료했으면
     // 공유메모리 총 사용자 수 1 감소
-    manage->id_buffer[id - 1] = 0;
     manage->total_user -= 1;
 
     // 만약 한명도 없으면 IPC 객체 모두 삭제
     if (manage->total_user == 0)
     {
         semctl(semid, IPC_RMID, 0);
-        shmctl(manage_shmid, IPC_RMID, 0);
-        shmctl(message_shmid, IPC_RMID, 0);
+        shmctl(manager_shmid, IPC_RMID, 0);
+        shmctl(message_arr_shmid, IPC_RMID, 0);
     }
 
     // 정상 종료
     exit(0);
-}
-
-void debug(struct manager *manager, struct message *message)
-{
-    int i;
-    printf("[manager] frontIdx : %d, backIdx : %d, users : %d\n", manager->frontIdx, manager->backIdx, manager->total_user);
-    printf("[id_buffer] : %d %d %d %d\n", manager->id_buffer[0], manager->id_buffer[1], manager->id_buffer[2],
-           manager->id_buffer[3]);
-
-    for (i = 0; i < N; i++)
-    {
-        printf("[%d : %s] ", (message + i)->sender_id, (message + i)->mtext);
-    }
-    printf("\n-----------------------------\n");
 }
