@@ -17,15 +17,15 @@
 #include <signal.h>
 #include <sys/errno.h>
 
-#define BUFSIZE 512 // 최대 메세지 사이즈
-#define N 5         // 유한 버퍼 크기
+#define BUFSIZE 512
+#define N 5
 
 void debug(struct manager *manager, struct message *message);
 
 // 공유메모리에 대한 정보가 이 구조체로 형변환됨
 struct manager
 {
-    // 유한 버퍼에서 배열을 원형큐 구조로 사용하기 때문에 idx 값 필요
+    // 유한 버퍼를 원형큐 구조로 사용하기 때문에 idx 정보 필요
     int frontIdx;
     int backIdx;
 

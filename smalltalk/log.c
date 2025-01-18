@@ -18,6 +18,12 @@ struct q_entry
     char msg[512];
 };
 
+struct manage_buffer
+{
+    int message_id;
+    int client_num;
+};
+
 void write_log(int qid, const char * log_file_name){
 
     struct q_entry msg;
@@ -53,11 +59,16 @@ void write_log(int qid, const char * log_file_name){
 // 이 프로그램은 채팅방을 개설한 사람만 실행함
 int main(int argc, char **argv)
 {
+    // 전달받은 문자열을 int로 변환
+    int shmid = atoi(argv[1]);
+    int semid = atoi(argv[2]);
+
     int i, qid, id, index;
     pid_t pid;
     key_t log_key;
 
     struct q_entry msg1, msg2;
+    struct manage_buffer* manager;
 
     log_key = ftok("logkey", 7);
 
@@ -67,6 +78,8 @@ int main(int argc, char **argv)
     {
         qid = msgget(log_key, 0600);
     }
+
+    manager = (struct manage_buffer *)shmat(shmid, 0, 0);
 
     // 로그 파일 생성
     FILE *log_file = fopen(LOG_FILE_NAME, "w");
