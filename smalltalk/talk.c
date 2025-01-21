@@ -1,236 +1,199 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <string.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <string.h>
+#include <time.h>
+#include <ftw.h>
+#include <stdlib.h>
+#include <sys/mman.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
 #include <sys/sem.h>
 #include <sys/shm.h>
-#include <sys/mman.h>
+#include <signal.h>
+#include <sys/errno.h>
 
-struct q_entry
+#define BUFSIZE 512
+#define N 100
+
+// Producer-Consumer Problem with 3 semaphore(1 mutex)
+// N : spaces left in buffer
+// 0 : messages that can be read
+// 1 : semaphore for mutual exclusion(mutex)
+
+struct manager
 {
-    long mtype;
-    int snum;
-    int cnum;
-    int s_id;
-    char msg[512];
+    int frontIdx;
+    int rearIdx;
+    int nextId;
+    int total_user;
 };
 
-struct manage_buffer
+struct message
 {
-    int cnum;
-    int index;
+    int read_counter;
+    int message_id;
+    int sender_id;
+    char mtext[BUFSIZE];
 };
 
-struct logpid_buffer
+void receiver(int id, int message_id, int semid, int manager_shmid, int message_arr_shmid)
 {
-    int logpid;
-};
+    struct sembuf wait[] = {{1, -1, 0}, {2, -1, 0}};
+    struct sembuf signal1[] = {{0, 1, 0}, {2, 1, 0}};
+    struct sembuf signal2[] = {{1, 1, 0}, {2, 1, 0}};
+    struct manager *manager_shm;
+    struct message *message_arr_shm;
 
-struct q_entry nmessage(int mtype, int s_id, char *str);
-
-void do_writer(int qid, int id, int semid, struct manage_buffer * shmptr)
-{
-    char buffer[512];
-    int i, cnum, index;
-    struct q_entry msg;
-    struct sembuf p_buf;
+    manager_shm = (struct manager *)shmat(manager_shmid, 0, 0);
+    message_arr_shm = (struct message *)shmat(message_arr_shmid, 0, 0);
 
     while (1)
     {
-        // 문장 입력받기
-        fgets(buffer, sizeof(buffer), stdin);
-        size_t len = strlen(buffer);
-        if (len > 0 && buffer[len - 1] == '\n')
+        /** critical section **/
+        semop(semid, wait, 2);
+
+        if (message_id == message_arr_shm[manager_shm->frontIdx].message_id)
         {
-            buffer[len - 1] = '\0';
+            if (message_arr_shm[manager_shm->frontIdx].sender_id != id)
+            {
+                printf("[receiver] %d : %s\n", message_arr_shm[manager_shm->frontIdx].sender_id, message_arr_shm[manager_shm->frontIdx].mtext);
+            }
+
+            message_arr_shm[manager_shm->frontIdx].read_counter--;
+            message_id++;
+
+            if (message_arr_shm[manager_shm->frontIdx].read_counter == 0)
+            {
+                manager_shm->frontIdx = (manager_shm->frontIdx + 1) % N;
+                semop(semid, signal1, 2);
+                continue;
+            }
         }
 
-        /* (i) message 보내기 전 준비 */
-        p_buf.sem_num = 0;
-        p_buf.sem_op = -1;
-        p_buf.sem_flg = 0;
-        semop(semid, &p_buf, 1);
-
-        cnum = shmptr->cnum;
-        shmptr->index++;
-        index = shmptr->index;
-
-        p_buf.sem_num = 0;
-        p_buf.sem_op = 1;
-        p_buf.sem_flg = 0;
-        semop(semid, &p_buf, 1);
-
-        msg = nmessage(index, id, buffer);
-        for (i = 0; i < cnum; i++)
-        {
-            msgsnd(qid, &msg, 524, 0);
-            sleep(1);
-        }
-
-        if (cnum == 1)
-            printf("id=%d, talkers=%d, msg#=%d ...\n", id, cnum, index);
-
-        if (strcmp(buffer, "talk quit") == 0)
-            break;
+        semop(semid, signal2, 2);
+        /** critical section **/
     }
-
-    exit(0);
+    return;
 }
 
-void do_reader(int qid, int id, int index)
+void sender(int id, int semid, int manager_shmid, int message_arr_shmid)
 {
-    struct q_entry msg;
+    struct sembuf wait[] = {{0, -1, 0}, {2, -1, 0}};
+    struct sembuf signal[] = {{1, 1, 0}, {2, 1, 0}};
+    struct manager *manager_shm;
+    struct message *message_arr_shm;
 
-    while (1)
+    manager_shm = (struct manager *)shmat(manager_shmid, 0, 0);
+    message_arr_shm = (struct message *)shmat(message_arr_shmid, 0, 0);
+
+    char input[BUFSIZE];
+
+    while (gets(input))
     {
-        /* (j) message 받기 */
-        msgrcv(qid, &msg, 524, index, 0);
-        if (msg.s_id != id)
-        {
-            printf("[sender=%d & msg#=%d] %s\n", msg.s_id, msg.mtype, msg.msg);
-        }
-        /* (c) message 받은 후 필요한 작업 */
-        else if (msg.s_id == id)
-        {
-            if (strcmp(msg.msg, "talk quit") == 0)
-                break;
-        }
+        /** critical section **/
+        semop(semid, wait, 2);
 
-        index++;
+        message_arr_shm[manager_shm->rearIdx].sender_id = id;
+        strcpy(message_arr_shm[manager_shm->rearIdx].mtext, input);
+        message_arr_shm[manager_shm->rearIdx].message_id = manager_shm->nextId;
+        message_arr_shm[manager_shm->rearIdx].read_counter = manager_shm->total_user;
+        manager_shm->nextId++;
+        manager_shm->rearIdx = (manager_shm->rearIdx + 1) % N;
+
+        semop(semid, signal, 2);
+        /** critical section **/
     }
-
-    exit(0);
+    return;
 }
-
-// pid_t exec_log(int shmid, int semid)
-// {
-//     char shmid_str[16], semid_str[16];
-
-//     // int를 문자열로 변환
-//     snprintf(shmid_str, sizeof(shmid_str), "%d", shmid);
-//     snprintf(semid_str, sizeof(semid_str), "%d", semid);
-
-//     pid_t logger_pid = fork();
-
-//     // 자식이면 여기서 진행
-//     if (logger_pid == 0)
-//     {
-//         // execl을 사용하여 다른 프로세스 실행 (num1_str, num2_str 전달)
-//         execl("./log", "log", shmid_str, semid_str, (char *)NULL);
-//         exit(0);
-//     }
-//     // 부모면 생성된 pid를 main한테 보냄
-//     else
-//     {
-//         return logger_pid;
-//     }
-// }
 
 int main(int argc, char **argv)
 {
-    int i, qid, shmid, semid, id, cnum, index;
+    int i, id;
+    int semid, manager_shmid, message_arr_shmid;
+    key_t semkey, manager_shmkey, message_arr_shmkey;
     pid_t pid[2];
-    struct q_entry msg1, msg2;
-    struct manage_buffer *shmptr;
-    struct sembuf p_buf;
 
-    key_t talk_key = ftok("token", 5);
+    union semun arg;
+    ushort buf[3] = {N, 0, 1};
+    struct manager *manage;
+    struct message *message;
 
-    // 세마포어 생성/참조
-    semid = semget(talk_key, 1, 0600 | IPC_CREAT | IPC_EXCL);
+    semkey = ftok("semkey", 3);
+    manager_shmkey = ftok("manage_shmkey", 3);
+    message_arr_shmkey = ftok("message_shmkey", 3);
+
+    semid = semget(semkey, 3, 0600 | IPC_CREAT | IPC_EXCL);
     if (semid == -1)
-        semid = semget(talk_key, 1, 0600);
-    else
-        semctl(semid, 0, SETVAL, 1);
-
-    // 공유메모리 생성/참조
-    shmid = shmget(talk_key, sizeof(struct manage_buffer), IPC_CREAT | 0666);
-    shmptr = (struct manage_buffer *)shmat(shmid, 0, 0);
-
-    // 메시지큐 생성/참조
-    qid = msgget(talk_key, 0600 | IPC_CREAT | IPC_EXCL);
-    if (qid == -1) {
-        qid = msgget(talk_key, 0600);
-    }else{
-        shmptr->cnum = 0;
-        shmptr->index = 1;
+    {
+        semid = semget(semkey, 3, 0600);
     }
+    else
+    {
+        arg.array = buf;
+        semctl(semid, 0, SETALL, arg);
+    }
+
+    manager_shmid = shmget(manager_shmkey, sizeof(struct manager), 0600 | IPC_CREAT);
+    manage = (struct manager *)shmat(manager_shmid, 0, 0);
+
+    if (manage->total_user == 0)
+    {
+        manage->frontIdx = 0;
+        manage->rearIdx = 0;
+        manage->nextId = 1;
+        manage->total_user = 0;
+    }
+
+    message_arr_shmid = shmget(message_arr_shmkey, N * sizeof(struct message), 0600 | IPC_CREAT);
+    message = (struct message *)shmat(message_arr_shmid, 0, 0);
 
     id = atoi(argv[1]);
 
-    /* (l) 통신 전 필요한 작업 */
-    p_buf.sem_num = 0;
-    p_buf.sem_op = -1;
-    p_buf.sem_flg = 0;
-    semop(semid, &p_buf, 1);
+    struct sembuf w_buf = {2, -1, 0};
+    struct sembuf s_buf = {2, 1, 0};
+    int message_id;
 
-    shmptr->cnum += 1;
-    cnum = shmptr->cnum;
-    index = shmptr->index;
+    /** critical section **/
+    semop(semid, &w_buf, 1);
+    manage->total_user += 1;
+    message_id = manage->nextId;
+    semop(semid, &s_buf, 1);
+    /** critical section **/
 
-    p_buf.sem_num = 0;
-    p_buf.sem_op = 1;
-    p_buf.sem_flg = 0;
-    semop(semid, &p_buf, 1);
+    printf("id : %d\n", id);
 
-    printf("id=%d, talkers=%d, msg#=%d ...\n", id, cnum, index);
-
-    /* (d) 함수 호출해서 message 주고 받기 */
     pid[0] = fork();
     if (pid[0] == 0)
     {
-        do_writer(qid, id, semid, shmptr);
-        exit(0); // fork해서 자식이 부모 코드 그대로 물려받고 자식에서 실행됨
+        receiver(id, message_id, semid, manager_shmid, message_arr_shmid);
+        exit(0);
     }
 
     pid[1] = fork();
     if (pid[1] == 0)
     {
-        do_reader(qid, id, index);
+        sender(id, semid, manager_shmid, message_arr_shmid);
         exit(0);
     }
 
-    // 자식 프로세스 종료될때까지 wait
-    for (i = 0; i < 2; i++)
+    for (int i = 0; i < 2; i++)
+    {
         wait(0);
-
-    p_buf.sem_num = 0;
-    p_buf.sem_op = -1;
-    p_buf.sem_flg = 0;
-    semop(semid, &p_buf, 1);
-
-    shmptr->cnum -= 1;
-
-    p_buf.sem_num = 0;
-    p_buf.sem_op = 1;
-    p_buf.sem_flg = 0;
-    semop(semid, &p_buf, 1);
-
-    // 채팅방에 아무도 없으면 IPC 객체 모두 삭제
-    if (msg1.cnum == 0) {
-        msgctl(qid, IPC_RMID, NULL);
-        shmctl(shmid, IPC_RMID, NULL);
-        semctl(semid, IPC_RMID, NULL);
     }
 
-    // 공유메모리 떼어내기
-    shmdt(shmptr);
+    manage->total_user -= 1;
+
+    if (manage->total_user == 0)
+    {
+        semctl(semid, IPC_RMID, 0);
+        shmctl(manager_shmid, IPC_RMID, 0);
+        shmctl(message_arr_shmid, IPC_RMID, 0);
+    }
+
     exit(0);
-}
-
-struct q_entry nmessage(int mtype, int s_id, char *str)
-{
-    struct q_entry msg;
-
-    msg.mtype = mtype;
-    msg.snum = 0;
-    msg.cnum = 0;
-    msg.s_id = s_id;
-    strcpy(msg.msg, str);
-
-    return msg;
 }
