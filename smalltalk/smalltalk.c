@@ -27,10 +27,10 @@
 
 struct manager
 {
-    int frontIdx;
-    int rearIdx;
-    int nextId;
-    int total_user;
+    int front_idx;
+    int rear_idx;
+    int next_mid;
+    int cnum;
 };
 
 struct message
@@ -57,19 +57,19 @@ void receiver(int id, int message_id, int semid, int manager_shmid, int message_
         /** critical section **/
         semop(semid, wait, 2);
 
-        if (message_id == message_arr_shm[manager_shm->frontIdx].message_id)
+        if (message_id == message_arr_shm[manager_shm->front_idx].message_id)
         {
-            if (message_arr_shm[manager_shm->frontIdx].sender_id != id)
+            if (message_arr_shm[manager_shm->front_idx].sender_id != id)
             {
-                printf("[receiver] %d : %s\n", message_arr_shm[manager_shm->frontIdx].sender_id, message_arr_shm[manager_shm->frontIdx].mtext);
+                printf("[receiver] %d : %s\n", message_arr_shm[manager_shm->front_idx].sender_id, message_arr_shm[manager_shm->front_idx].mtext);
             }
 
-            message_arr_shm[manager_shm->frontIdx].read_counter--;
+            message_arr_shm[manager_shm->front_idx].read_counter--;
             message_id++;
 
-            if (message_arr_shm[manager_shm->frontIdx].read_counter == 0)
+            if (message_arr_shm[manager_shm->front_idx].read_counter == 0)
             {
-                manager_shm->frontIdx = (manager_shm->frontIdx + 1) % N;
+                manager_shm->front_idx = (manager_shm->front_idx + 1) % N;
                 semop(semid, signal1, 2);
                 continue;
             }
@@ -98,12 +98,12 @@ void sender(int id, int semid, int manager_shmid, int message_arr_shmid)
         /** critical section **/
         semop(semid, wait, 2);
 
-        message_arr_shm[manager_shm->rearIdx].sender_id = id;
-        strcpy(message_arr_shm[manager_shm->rearIdx].mtext, input);
-        message_arr_shm[manager_shm->rearIdx].message_id = manager_shm->nextId;
-        message_arr_shm[manager_shm->rearIdx].read_counter = manager_shm->total_user;
-        manager_shm->nextId++;
-        manager_shm->rearIdx = (manager_shm->rearIdx + 1) % N;
+        message_arr_shm[manager_shm->rear_idx].sender_id = id;
+        strcpy(message_arr_shm[manager_shm->rear_idx].mtext, input);
+        message_arr_shm[manager_shm->rear_idx].message_id = manager_shm->next_mid;
+        message_arr_shm[manager_shm->rear_idx].read_counter = manager_shm->cnum;
+        manager_shm->next_mid++;
+        manager_shm->rear_idx = (manager_shm->rear_idx + 1) % N;
 
         semop(semid, signal, 2);
         /** critical section **/
@@ -141,12 +141,12 @@ int main(int argc, char **argv)
     manager_shmid = shmget(manager_shmkey, sizeof(struct manager), 0600 | IPC_CREAT);
     manage = (struct manager *)shmat(manager_shmid, 0, 0);
 
-    if (manage->total_user == 0)
+    if (manage->cnum == 0)
     {
-        manage->frontIdx = 0;
-        manage->rearIdx = 0;
-        manage->nextId = 1;
-        manage->total_user = 0;
+        manage->front_idx = 0;
+        manage->rear_idx = 0;
+        manage->next_mid = 1;
+        manage->cnum = 0;
     }
 
     message_arr_shmid = shmget(message_arr_shmkey, N * sizeof(struct message), 0600 | IPC_CREAT);
@@ -160,8 +160,8 @@ int main(int argc, char **argv)
 
     /** critical section **/
     semop(semid, &w_buf, 1);
-    manage->total_user += 1;
-    message_id = manage->nextId;
+    manage->cnum += 1;
+    message_id = manage->next_mid;
     semop(semid, &s_buf, 1);
     /** critical section **/
 
@@ -186,9 +186,9 @@ int main(int argc, char **argv)
         wait(0);
     }
 
-    manage->total_user -= 1;
+    manage->cnum -= 1;
 
-    if (manage->total_user == 0)
+    if (manage->cnum == 0)
     {
         semctl(semid, IPC_RMID, 0);
         shmctl(manager_shmid, IPC_RMID, 0);
