@@ -29,7 +29,7 @@ struct manager
 {
     int front_idx;
     int rear_idx;
-    int next_mid;
+    int next_id;
     int cnum;
 };
 
@@ -54,9 +54,10 @@ void receiver(int id, int message_id, int semid, int manager_shmid, int message_
 
     while (1)
     {
-        /** critical section **/
         semop(semid, wait, 2);
-
+        
+        /** critical section **/
+        
         if (message_id == message_arr_shm[manager_shm->front_idx].message_id)
         {
             if (message_arr_shm[manager_shm->front_idx].sender_id != id)
@@ -75,8 +76,9 @@ void receiver(int id, int message_id, int semid, int manager_shmid, int message_
             }
         }
 
-        semop(semid, signal2, 2);
         /** critical section **/
+
+        semop(semid, signal2, 2);
     }
     return;
 }
@@ -95,18 +97,20 @@ void sender(int id, int semid, int manager_shmid, int message_arr_shmid)
 
     while (gets(input))
     {
-        /** critical section **/
         semop(semid, wait, 2);
+
+        /** critical section **/
 
         message_arr_shm[manager_shm->rear_idx].sender_id = id;
         strcpy(message_arr_shm[manager_shm->rear_idx].mtext, input);
-        message_arr_shm[manager_shm->rear_idx].message_id = manager_shm->next_mid;
+        message_arr_shm[manager_shm->rear_idx].message_id = manager_shm->next_id;
         message_arr_shm[manager_shm->rear_idx].read_counter = manager_shm->cnum;
-        manager_shm->next_mid++;
+        manager_shm->next_id++;
         manager_shm->rear_idx = (manager_shm->rear_idx + 1) % N;
 
-        semop(semid, signal, 2);
         /** critical section **/
+
+        semop(semid, signal, 2);
     }
     return;
 }
@@ -145,7 +149,7 @@ int main(int argc, char **argv)
     {
         manage->front_idx = 0;
         manage->rear_idx = 0;
-        manage->next_mid = 1;
+        manage->next_id = 1;
         manage->cnum = 0;
     }
 
@@ -158,12 +162,14 @@ int main(int argc, char **argv)
     struct sembuf s_buf = {2, 1, 0};
     int message_id;
 
-    /** critical section **/
     semop(semid, &w_buf, 1);
-    manage->cnum += 1;
-    message_id = manage->next_mid;
-    semop(semid, &s_buf, 1);
     /** critical section **/
+    
+    manage->cnum += 1;
+    message_id = manage->next_id;
+
+    /** critical section **/
+    semop(semid, &s_buf, 1);
 
     printf("id : %d\n", id);
 

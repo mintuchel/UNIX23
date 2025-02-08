@@ -18,15 +18,15 @@
 #include <sys/errno.h>
 
 #define BUFSIZE 512
-#define N 5
+#define N 100
 
 // 공유메모리에 대한 정보
 struct manager
 {
-    int frontIdx; // 원형큐 머리
-    int rearIdx; // 원형큐 꼬리
+    int front_idx; // 원형큐 머리
+    int rear_idx; // 원형큐 꼬리
     int nextId; // 다음 메시지 id
-    int total_user; // 현재 접속인원수
+    int cnum; // 현재 접속인원수
 };
 
 // 메시지 정보
@@ -57,8 +57,8 @@ void receiver(int id, int message_id, int semid, int manager_shmid, int message_
     struct manager *manager_shm;
     struct message *message_arr_shm;
 
-    manager_shm = (struct manager *)shmat(manage_shmid, 0, 0);
-    message_arr_shm = (struct message *)shmat(message_shmid, 0, 0);
+    manager_shm = (struct manager *)shmat(manager_shmid, 0, 0);
+    message_arr_shm = (struct message *)shmat(message_arr_shmid, 0, 0);
 
     while (1)
     {
@@ -66,22 +66,22 @@ void receiver(int id, int message_id, int semid, int manager_shmid, int message_
         semop(semid, wait, 2);
 
         // 현재 처리해야하는 id 와 메시지의 id가 동일하다면 읽기
-        if (message_id == message_arr_shm[manager_shm->frontIdx].message_id)
+        if (message_id == message_arr_shm[manager_shm->front_idx].message_id)
         {
             // 내가 보낸게 아니라면 출력
-            if(message_arr_shm[manager_shm->frontIdx].sender_id != id){
-                printf("[receiver] %d : %s\n", message_arr_shm[manager_shm->frontIdx].sender_id, message_arr_shm[manager_shm->frontIdx].mtext);
+            if(message_arr_shm[manager_shm->front_idx].sender_id != id){
+                printf("[receiver] %d : %s\n", message_arr_shm[manager_shm->front_idx].sender_id, message_arr_shm[manager_shm->front_idx].mtext);
             }
 
             // 메시지 읽은 사람 -1
-            message_arr_shm[manager_shm->frontIdx].read_counter--;
+            message_arr_shm[manager_shm->front_idx].read_counter--;
             // 다음으로 읽어야할 message_id +1
             message_id++;
 
             // 모든 수신자가 해당 메시지를 읽었다면
-            if (message_arr_shm[manager_shm->frontIdx].read_counter == 0) {
+            if (message_arr_shm[manager_shm->front_idx].read_counter == 0) {
                 // 원형큐의 frontIdx를 다음 위치로 이동
-                manager_shm->frontIdx = (manager_shm->frontIdx + 1) % N;
+                manager_shm->front_idx = (manager_shm->front_idx + 1) % N;
                 // 버퍼 공간 확보 신호 + 공유 자원 접근 권한 반환
                 semop(semid, signal1, 2);
                 continue;
@@ -110,8 +110,8 @@ void sender(int id, int semid, int manager_shmid, int message_arr_shmid)
     struct manager *manager_shm;
     struct message *message_arr_shm;
 
-    manager_shm = (struct manager *)shmat(manage_shmid, 0, 0);
-    message_arr_shm = (struct message *)shmat(message_shmid, 0, 0);
+    manager_shm = (struct manager *)shmat(manager_shmid, 0, 0);
+    message_arr_shm = (struct message *)shmat(message_arr_shmid, 0, 0);
 
     char input[BUFSIZE];
 
@@ -121,14 +121,14 @@ void sender(int id, int semid, int manager_shmid, int message_arr_shmid)
         semop(semid, wait, 2);
 
         // message 버퍼에 저장하기
-        message_arr_shm[manager_shm->rearIdx].sender_id = id;
-        strcpy(message_arr_shm[manager_shm->rearIdx].mtext, input);
-        message_arr_shm[manager_shm->rearIdx].message_id = manager_shm->nextId;
-        message_arr_shm[manager_shm->rearIdx].read_counter = manager_shm->total_user;
+        message_arr_shm[manager_shm->rear_idx].sender_id = id;
+        strcpy(message_arr_shm[manager_shm->rear_idx].mtext, input);
+        message_arr_shm[manager_shm->rear_idx].message_id = manager_shm->nextId;
+        message_arr_shm[manager_shm->rear_idx].read_counter = manager_shm->cnum;
         manager_shm->nextId++;
         // 내 메시지 저장했으니 다음 메시지 저장될 곳 갱신
         // 원형큐이므로 버퍼 내에서 계속 순환하며 저장
-        manager_shm->rearIdx = (manager_shm->rearIdx + 1) % N;
+        manager_shm->rear_idx = (manager_shm->rear_idx + 1) % N;
 
         // semsignal
         semop(semid, signal, 2);
@@ -184,11 +184,11 @@ int main(int argc, char **argv)
     manage = (struct manager *)shmat(manager_shmid, 0, 0);
 
     // 톡방을 판 사람이면 초기화 진행
-    if(manage->total_user == 0){
-        manage->frontIdx = 0;
-        manage->rearIdx = 0;
+    if(manage->cnum == 0){
+        manage->front_idx = 0;
+        manage->rear_idx = 0;
         manage->nextId = 1;
-        manage->total_user = 0;
+        manage->cnum = 0;
     }
 
     // N개의 message_buffer 공간을 확보한 shared_memory 생성/참조
@@ -204,7 +204,7 @@ int main(int argc, char **argv)
 
     semop(semid, &w_buf, 1);
 
-    manage->total_user += 1; // 공유메모리 사용자 + 1
+    manage->cnum += 1; // 공유메모리 사용자 + 1
     message_id = manage->nextId; // 읽어야할 메시지 수 파악
 
     semop(semid, &s_buf, 1);
@@ -228,10 +228,10 @@ int main(int argc, char **argv)
 
     // 특정 사용자가 종료했으면
     // 공유메모리 총 사용자 수 1 감소
-    manage->total_user -= 1;
+    manage->cnum -= 1;
 
     // 만약 한명도 없으면 IPC 객체 모두 삭제
-    if (manage->total_user == 0)
+    if (manage->cnum == 0)
     {
         semctl(semid, IPC_RMID, 0);
         shmctl(manager_shmid, IPC_RMID, 0);
