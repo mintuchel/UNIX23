@@ -36,7 +36,7 @@ void do_writer(int qid, int id){
 	    msg2=nmessage(index, id, temp);
         for (i=0; i<cnum; i++){ 
             msgsnd(qid, &msg2, 524, 0);
-	        sleep(1);
+	        // sleep(1);
         }
 
 	if (cnum==1) 
